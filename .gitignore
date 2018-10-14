@@ -1,0 +1,6 @@
+env/
+*.pyc
+index.html
+.idea/
+data/
+.vscode/
