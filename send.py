@@ -38,7 +38,7 @@ def make_signal(frequency, rate, buffer_size):
     xs = np.linspace(0, actual_space, actual_space) * numpy.pi * 2 * waves_per_buffer
     xs = np.append(xs, extra_space)
     ys = np.sin(xs)
-    ys = [(n * (1.0 - (0.01 * np.random.rand(1)[0]))) for n in ys]
+    # ys = [(n * (1.0 - (0.01 * np.random.rand(1)[0]))) for n in ys]
 
     # ys *= np.hamming(len(ys))
 
@@ -81,8 +81,16 @@ def main():
                      output=True)
 
     stream.write(silence)
+
     for char in msg:
         for bit in byte_to_bits(ord(char)):
+            message = codec.encode16(signal_1 if bit else signal_0)
+            stream.write(message)
+
+    for char in config.FRAME_DATA:
+        bits = byte_to_bits(ord(char))
+        print(bits)
+        for bit in bits:
             message = codec.encode16(signal_1 if bit else signal_0)
             stream.write(message)
 

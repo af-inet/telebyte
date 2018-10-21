@@ -21,14 +21,19 @@ def main():
     start = args.start
     end = args.end
 
+    sign = 1 if end-start > 0 else -1
+
+    numbers = range(start, end+sign, sign)
+
     values = [
-        [x] + [x * y for y in xrange(start, end+1)]
-        for x in xrange(start, end+1)
+        [x] + [x * y for y in numbers]
+        for x in numbers
     ]
 
-    spacing = len(str(end * end))
+    spacing = len(str(max(numbers) ** 2))
 
-    header = [""] + range(start, end+1)
+    # first cell in the header will be blank
+    header = [""] + numbers
 
     print(format_row(header, spacing))
 

@@ -7,8 +7,7 @@ import traceback
 import config
 import codec
 import collections
-import threading
-
+import multiprocessing
 from contextlib import contextmanager
 import time
 import logging
@@ -26,8 +25,9 @@ def timed(prefix=""):
 
 
 class State(object):
+
     def __init__(self, maxlen):
-        self.ring = collections.deque(maxlen=maxlen)
+        self.ring = multiprocessing.Queue(maxlen)
         self.running = True
 
 
@@ -73,9 +73,7 @@ def calculate_signal_to_noise(fft_frames):
     noise_amps = []
     signal_amps = []
 
-    for frame in fft_frames:
-        amp0 = abs(frame[config.FREQ_0])
-        amp1 = abs(frame[config.FREQ_1])
+    for amp0, amp1 in fft_frames:
         if amp0 > amp1:
             noise_amps.append(amp1)
             signal_amps.append(amp0)
@@ -84,6 +82,7 @@ def calculate_signal_to_noise(fft_frames):
             signal_amps.append(amp1)
 
     return sum(signal_amps) / sum(noise_amps)
+
 
 
 def detect_sync_word(data, scan_count):
@@ -112,6 +111,7 @@ def detect_sync_word(data, scan_count):
             chunk_start = i * config.SYMBOL_SIZE
             chunk_end = chunk_start + config.SYMBOL_SIZE
             window = chunk[chunk_start:chunk_end]
+            window *= numpy.hamming(len(window))
             result = numpy.fft.rfft(window, norm="ortho")
             freq_0 = (config.SYMBOL_SIZE * config.FREQ_0) / config.RATE
             freq_1 = (config.SYMBOL_SIZE * config.FREQ_1) / config.RATE
@@ -123,13 +123,13 @@ def detect_sync_word(data, scan_count):
                 for amp0, amp1 in fft_frames]
 
         # TODO: signal to noise
-        # snr = calculate_signal_to_noise(fft_frames)
+        snr = calculate_signal_to_noise(fft_frames)
 
         decoded_string = codec.bits_to_string(bits)
 
         if decoded_string == config.SYNC_WORD:
 
-            return 0, start
+            return snr, start
 
     return 0.0, None
 
@@ -142,6 +142,45 @@ def read_thread(state,  # type: State
         state.ring.append(data)
 
 
+def read_frame(state, offset):
+    # consume all the data in the stream
+    data = [state.ring.popleft() for _ in range(len(state.ring))]
+    data = [codec.decode16(block) for block in data]
+    data = flatten(data)
+    # throw away everything before the offset
+    data = data[offset+(config.SYNC_WORD_SIZE):]
+
+    # wait until we have enough data for a full frame
+    while len(data) < (config.FRAME_SIZE * config.SYMBOL_SIZE):
+        if len(state.ring) > 0:
+            block = codec.decode16(state.ring.popleft())
+            data += block
+            # print("reading frame...")
+        time.sleep(0.01)
+
+    # print(len(data))
+    # chunk by symbol size
+    symbols = list(batch(data, n=config.SYMBOL_SIZE))[:config.FRAME_SIZE]
+
+    fft_frames = []
+    for symbol in symbols:
+        result = numpy.fft.rfft(symbol, norm="ortho")
+        freq_0 = (config.SYMBOL_SIZE * config.FREQ_0) / config.RATE
+        freq_1 = (config.SYMBOL_SIZE * config.FREQ_1) / config.RATE
+        amp0 = abs(result[freq_0])
+        amp1 = abs(result[freq_1])
+        fft_frames.append((amp0, amp1))
+
+    bits = [0 if amp0 > amp1 else 1
+            for amp0, amp1 in fft_frames]
+    # print(bits)
+
+    decoded_string = codec.bits_to_string(bits)
+
+    print("frame: %s" % decoded_string)
+
+
+
 def main():
 
     min_num_of_chunks = int(config.SYNC_WORD_SIZE / config.BUFFER_SIZE) + 1
@@ -150,8 +189,8 @@ def main():
 
     state = State(None)
 
-    thread = threading.Thread(target=read_thread, args=(state,))
-    thread.start()
+    process = multiprocessing.Process(target=read_thread, args=(state,))
+    process.start()
 
     try:
         while True:
@@ -162,11 +201,19 @@ def main():
                 snapshot = [codec.decode16(s) for s in snapshot]
                 snapshot = flatten(snapshot)
                 with timed("detect[%s] (%s)" % (len(state.ring), config.BUFFER_SIZE)):
-                    snr, sync_word_offset = detect_sync_word(snapshot, scan_count=80)
+                    snr, sync_word_offset = detect_sync_word(snapshot, scan_count=32)
                     snr = "%.4f" % float(snr)
                     if sync_word_offset is not None:
-                        print(snr, sync_word_offset)
-                state.ring.popleft()
+                        print("detected sync word; snr= %s, offset= %s" % (snr, sync_word_offset))
+                        read_frame(state, sync_word_offset)
+                    else:
+                        state.ring.popleft()
+                # we're starting to overflow, drop some frames
+                if len(state.ring) > (num_of_chunks * 4):
+                    # dropping frame
+                    while len(state.ring) > num_of_chunks:
+                        state.ring.popleft()
+                    print("dropped frames")
 
             time.sleep(0.01)
 
