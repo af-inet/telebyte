@@ -25,25 +25,23 @@ def random_linspace(end, count):
 
 def make_signal(frequency, rate, buffer_size):
 
-    samples_per_wave = float(rate) / float(frequency)
+    samples_per_wave = np.floor(float(rate) / float(frequency))
 
-    waves_per_buffer = buffer_size / samples_per_wave
+    waves_per_buffer = float(buffer_size) / float(samples_per_wave)
     waves_per_buffer = np.floor(waves_per_buffer)
 
     actual_space = samples_per_wave * waves_per_buffer
 
-    extra_space = np.linspace(0, 0, buffer_size - actual_space)
+    extra_space = np.linspace(0, 0, int(buffer_size - actual_space))
 
-    # num_of_samples = waves_per_buffer * samples_per_wave
-    xs = np.linspace(0, actual_space, actual_space) * numpy.pi * 2 * waves_per_buffer
-    xs = np.append(xs, extra_space)
+    xs = np.linspace(0, int(actual_space), int(actual_space)) * numpy.pi * 2 * waves_per_buffer
     ys = np.sin(xs)
-    # ys = [(n * (1.0 - (0.01 * np.random.rand(1)[0]))) for n in ys]
+    ys = np.append(extra_space, ys)
 
-    # ys *= np.hamming(len(ys))
+    assert len(ys) == buffer_size
 
     print(
-        " ".join([
+        "\n" + " ".join([
             "frequency= %.2f" % frequency,
             "length= %.2f (%.2f)" % (len(ys), float(len(ys)) / float(rate)),
             "samples_per_wave= %.2f" % samples_per_wave,
@@ -68,6 +66,11 @@ def main():
 
     msg = config.SYNC_WORD
 
+    freq_0 = ((config.SYMBOL_SIZE * config.FREQ_0) / config.RATE)
+    freq_1 = ((config.SYMBOL_SIZE * config.FREQ_1) / config.RATE)
+    print("window freq_0=%s" % freq_0)
+    print("window freq_1=%s" % freq_1)
+
     signal_0 = make_signal(config.FREQ_0, config.RATE, config.SYMBOL_SIZE)
     signal_1 = make_signal(config.FREQ_1, config.RATE, config.SYMBOL_SIZE)
 
@@ -81,23 +84,30 @@ def main():
                      output=True)
 
     stream.write(silence)
+    stream.write(silence)
+    stream.write(silence)
 
-    for char in msg:
-        for bit in byte_to_bits(ord(char)):
-            message = codec.encode16(signal_1 if bit else signal_0)
-            stream.write(message)
+    for _ in range(16):
+        for char in msg:
+            for bit in byte_to_bits(ord(char)):
 
-    for char in config.FRAME_DATA:
-        bits = byte_to_bits(ord(char))
-        print(bits)
-        for bit in bits:
-            message = codec.encode16(signal_1 if bit else signal_0)
-            stream.write(message)
+                message = codec.encode_int16(signal_1 if bit else signal_0)
+                assert (len(message) / 2) == config.SYMBOL_SIZE
+
+                stream.write(message)
+
+        for char in config.FRAME_DATA:
+            bits = byte_to_bits(ord(char))
+            for bit in bits:
+                message = codec.encode_int16(signal_1 if bit else signal_0)
+                stream.write(message)
+
+        print("sent: %s" % config.FRAME_DATA)
 
     # if you don't end with silence, the program will end before the audio stream does
     stream.write(silence)
     stream.write(silence)
-
+    stream.write(silence)
 
 if __name__ == '__main__':
     main()
