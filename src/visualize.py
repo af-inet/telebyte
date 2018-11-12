@@ -1,5 +1,6 @@
+#!/usr/bin/env pythonw
 import matplotlib.pyplot as p
-import send, receive, codec, config
+import send, config
 
 signal_0 = send.make_signal(config.FREQ_0, config.RATE, config.SYMBOL_SIZE)
 signal_1 = send.make_signal(config.FREQ_1, config.RATE, config.SYMBOL_SIZE)

@@ -3,7 +3,7 @@ import numpy as np
 import numpy.fft
 import pyaudio
 import config, codec
-
+import datetime
 
 
 def flatten(lists):
@@ -41,7 +41,7 @@ def make_signal(frequency, rate, buffer_size):
     assert len(ys) == buffer_size
 
     print(
-        "\n" + " ".join([
+        " ".join([
             "frequency= %.2f" % frequency,
             "length= %.2f (%.2f)" % (len(ys), float(len(ys)) / float(rate)),
             "samples_per_wave= %.2f" % samples_per_wave,
@@ -62,14 +62,14 @@ def empty():
     return ys
 
 
+def init_frame(data):
+    assert len(data) < len(config.FRAME_DATA)
+    space = len(config.FRAME_DATA) - len(data)
+    frame = data + (" " * space)
+    return frame
+
+
 def main():
-
-    msg = config.SYNC_WORD
-
-    freq_0 = ((config.SYMBOL_SIZE * config.FREQ_0) / config.RATE)
-    freq_1 = ((config.SYMBOL_SIZE * config.FREQ_1) / config.RATE)
-    print("window freq_0=%s" % freq_0)
-    print("window freq_1=%s" % freq_1)
 
     signal_0 = make_signal(config.FREQ_0, config.RATE, config.SYMBOL_SIZE)
     signal_1 = make_signal(config.FREQ_1, config.RATE, config.SYMBOL_SIZE)
@@ -83,31 +83,38 @@ def main():
                      rate=config.RATE,
                      output=True)
 
-    stream.write(silence)
-    stream.write(silence)
-    stream.write(silence)
+    for _ in range(4):
+        stream.write(silence)
 
-    for _ in range(16):
-        for char in msg:
+    for i in range(16):
+
+        # write the sync word
+        for char in config.SYNC_WORD:
             for bit in byte_to_bits(ord(char)):
-
                 message = codec.encode_int16(signal_1 if bit else signal_0)
                 assert (len(message) / 2) == config.SYMBOL_SIZE
-
                 stream.write(message)
 
-        for char in config.FRAME_DATA:
+        # write the message
+        now = str(datetime.datetime.now())
+        frame = init_frame(now)
+        frame = str(i) + " " + frame
+        frame = frame[:len(config.FRAME_DATA)]
+
+        for char in frame:
             bits = byte_to_bits(ord(char))
             for bit in bits:
                 message = codec.encode_int16(signal_1 if bit else signal_0)
                 stream.write(message)
 
-        print("sent: %s" % config.FRAME_DATA)
+        print("sent: %s" % frame)
 
-    # if you don't end with silence, the program will end before the audio stream does
-    stream.write(silence)
-    stream.write(silence)
-    stream.write(silence)
+    for _ in range(4):
+        stream.write(silence)
+    stream.stop_stream()
+    stream.close()
+    pa.terminate()
+
 
 if __name__ == '__main__':
     main()

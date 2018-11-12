@@ -3,6 +3,7 @@
 #
 import array
 import numpy
+import string
 
 
 INT16_MAX = 32767
@@ -87,12 +88,14 @@ def bits_to_string(bits):
     assert ((len(bits) % 8) == 0)
 
     word_count = int(len(bits) / 8)
-    string = b''
+    s = b''
 
     for i in range(word_count):
         word = bits[i*8:(i*8)+8]
-        byte = bits_to_byte(word)
-        char = bytes(chr(byte), encoding='utf-8')
-        string += char
+        byte = bits_to_byte(word) & 0x7F
+        # char = bytes(chr(byte), encoding='utf-8')
+        char = bytes(chr(byte))
+        s += char
 
-    return string.decode("utf-8")
+    c = s.decode("ascii")
+    return c if c in string.printable else "_"
